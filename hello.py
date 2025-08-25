@@ -1,75 +1,98 @@
-# file: level3_collisions.py
-import pygame, sys
-
+# file: level4_enemies_scoring.py
+import pygame, sys, random
 pygame.init()
+
+# --- setup ---
 WIDTH, HEIGHT = 800, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Level 3: Collisions")
+pygame.display.set_caption("Level 4: Scoring & Enemies")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, 32)
+font = pygame.font.SysFont(None, 36)
 
-# --- player (a rectangle) ---
+# --- player ---
 PLAYER_SIZE = 50
-player = pygame.Rect(WIDTH//2 - PLAYER_SIZE//2, HEIGHT - PLAYER_SIZE - 30, PLAYER_SIZE, PLAYER_SIZE)
-PLAYER_SPEED = 6
+PLAYER_SPEED = 320  # pixels/second (time-based movement)
+player = pygame.Rect(WIDTH//2 - PLAYER_SIZE//2, HEIGHT - PLAYER_SIZE - 24, PLAYER_SIZE, PLAYER_SIZE)
 
-# --- obstacles (rectangles) ---
-# static block
-block = pygame.Rect(480, 220, 140, 70)
-# moving block (slides left-right)
-mover = pygame.Rect(120, 140, 120, 50)
-mover_speed = 4
+# --- enemies ---
+enemies = []
+SPAWN_INTERVAL = 0.7   # seconds between spawns (base)
+spawn_timer = 0.0
 
-def draw_text(text, x, y, color=(230,230,230)):
-    surf = font.render(text, True, color)
-    screen.blit(surf, (x, y))
+def spawn_enemy():
+    w = random.randint(30, 70)
+    x = random.randint(0, WIDTH - w)
+    y = -w
+    vy = random.randint(160, 340)  # fall speed px/s
+    color = (random.randint(120,255), random.randint(90,200), random.randint(90,200))
+    return {"rect": pygame.Rect(x, y, w, w), "vy": vy, "color": color}
 
-running = True
-while running:
-    dt = clock.tick(60)  # limit to 60 FPS
-    # --- events ---
+# --- game state ---
+alive = True
+score = 0.0
+
+def reset():
+    global player, enemies, spawn_timer, alive, score
+    player.update(WIDTH//2 - PLAYER_SIZE//2, HEIGHT - PLAYER_SIZE - 24, PLAYER_SIZE, PLAYER_SIZE)
+    enemies.clear()
+    spawn_timer = 0.0
+    alive = True
+    score = 0.0
+
+# --- loop ---
+while True:
+    dt = clock.tick(60) / 1000.0  # seconds since last frame
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit(); sys.exit()
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_ESCAPE:
+                pygame.quit(); sys.exit()
+            if event.key == pygame.K_r and not alive:
+                reset()
 
-    # --- input & movement ---
+    # input & movement (time-based)
     keys = pygame.key.get_pressed()
-    dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
-    dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
-    player.x += dx * PLAYER_SPEED
-    player.y += dy * PLAYER_SPEED
+    if alive:
+        dx = (keys[pygame.K_RIGHT] or keys[pygame.K_d]) - (keys[pygame.K_LEFT] or keys[pygame.K_a])
+        dy = (keys[pygame.K_DOWN]  or keys[pygame.K_s]) - (keys[pygame.K_UP]   or keys[pygame.K_w])
+        player.x += int(dx * PLAYER_SPEED * dt)
+        player.y += int(dy * PLAYER_SPEED * dt)
+        player.clamp_ip(screen.get_rect())
 
-    # keep player within window
-    player.clamp_ip(screen.get_rect())
+        # spawn enemies over time (light difficulty curve)
+        spawn_timer += dt
+        interval = max(0.30, SPAWN_INTERVAL - score * 0.02)  # gets a bit harder as score grows
+        while spawn_timer >= interval:
+            enemies.append(spawn_enemy())
+            spawn_timer -= interval
 
-    # --- move the moving obstacle ---
-    mover.x += mover_speed
-    if mover.right >= WIDTH or mover.left <= 0:
-        mover_speed *= -1  # bounce
+        # move enemies & cull off-screen
+        for e in enemies:
+            e["rect"].y += int(e["vy"] * dt)
+        enemies = [e for e in enemies if e["rect"].top <= HEIGHT]
 
-    # --- collision checks ---
-    hit_static = player.colliderect(block)
-    hit_mover  = player.colliderect(mover)
-    collided   = hit_static or hit_mover
+        # collision
+        for e in enemies:
+            if player.colliderect(e["rect"]):
+                alive = False
+                break
+
+        # scoring
+        score += dt
 
     # --- draw ---
-    screen.fill((24, 24, 32))
-
-    # draw obstacles
-    pygame.draw.rect(screen, (200, 140, 60), block)         # static
-    pygame.draw.rect(screen, (120, 160, 255), mover)        # moving
-
-    # draw player (turn red if colliding)
-    color = (80, 220, 120) if not collided else (220, 80, 80)
-    pygame.draw.rect(screen, color, player)
-
-    # outlines (to visualize hitboxes)
-    pygame.draw.rect(screen, (50,50,50), block, 2)
-    pygame.draw.rect(screen, (50,50,50), mover, 2)
-    pygame.draw.rect(screen, (230,230,230), player, 2)
-
-    # UI text
-    draw_text("WASD / Arrows to move", 10, 10)
-    draw_text("Collision: " + ("YES" if collided else "no"), 10, 44, (255,100,100) if collided else (130,220,130))
+    screen.fill((22, 22, 30))
+    # enemies
+    for e in enemies:
+        pygame.draw.rect(screen, e["color"], e["rect"])
+    # player
+    pygame.draw.rect(screen, (80, 220, 120) if alive else (140, 140, 140), player)
+    # UI
+    screen.blit(font.render(f"Score: {score:.1f}", True, (235,235,235)), (10, 10))
+    screen.blit(font.render("Arrows/WASD to move", True, (180,180,200)), (10, 44))
+    if not alive:
+        msg = font.render("Game Over — R to Restart, Esc to Quit", True, (255,120,120))
+        screen.blit(msg, (WIDTH//2 - msg.get_width()//2, HEIGHT//2 - msg.get_height()//2))
 
     pygame.display.flip()
